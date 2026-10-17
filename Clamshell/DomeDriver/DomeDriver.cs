@@ -367,14 +367,14 @@ namespace ASCOM.Clamshell.Dome
 
                     if (value)
                     {
-                        connectedState = true;
                         LogMessage("Connected Set", "Connecting to device");
-                        DomeHardware.Connected = true;
+                        DomeHardware.Connected = true; // throws if the configuration is invalid or the board is unreachable
+                        connectedState = true;         // only reached when the hardware check succeeded
                     }
                     else
                     {
-                        connectedState = false;
                         LogMessage("Connected Set", "Disconnecting from device");
+                        connectedState = false;
                         DomeHardware.Connected = false;
                     }
                 }
