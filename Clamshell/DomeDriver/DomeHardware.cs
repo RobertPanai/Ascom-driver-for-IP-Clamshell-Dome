@@ -1,10 +1,8 @@
-﻿// TODO fill in this information for your driver, then remove this line!
+﻿// ASCOM Dome hardware class for the Clamshell IP relay dome.
 //
-// ASCOM Dome hardware class for Clamshell
-//
-// Description:	 <To be completed by driver developer>
-//
-// Implements:	ASCOM Dome interface version: <To be completed by driver developer>
+// Description:	Device logic shared by all driver instances: configuration stored in the ASCOM Profile,
+//				the shutter state machine (DomeController) and the ASCOM dome interface.
+// Implements:	ASCOM Dome interface version: 2
 // Author:		Robert Panai - robertpanai96@gmail.com
 //
 
@@ -12,6 +10,7 @@ using ASCOM;
 using ASCOM.Astrometry;
 using ASCOM.Astrometry.AstroUtils;
 using ASCOM.Astrometry.NOVAS;
+using ASCOM.Clamshell.Core;
 using ASCOM.DeviceInterface;
 using ASCOM.Utilities;
 using System;
@@ -21,46 +20,46 @@ using System.Windows.Forms;
 
 namespace ASCOM.Clamshell.Dome
 {
-    //
-    // TODO Replace the not implemented exceptions with code to implement the function or throw the appropriate ASCOM exception.
-    //
-
     /// <summary>
-    /// ASCOM Dome hardware class for Clamshell.
+    /// ASCOM Dome hardware class for the Clamshell IP relay dome.
     /// </summary>
-    [HardwareClass()] // Class attribute flag this as a device hardware class that needs to be disposed by the local server when it exits.
+    [HardwareClass()] // Flags this class as a hardware class that the local server disposes when it exits.
     internal static class DomeHardware
     {
-        // Constants used for Profile persistence
-        internal const string comPortProfileName = "COM Port";
-        internal const string comPortDefault = "COM1";
+        // ASCOM Profile keys (DeviceType "Dome")
+        private const string ConfigProfileName = "Config";
+        private const string StateProfileName = "State";
         internal const string traceStateProfileName = "Trace Level";
         internal const string traceStateDefault = "true";
 
-        //GPT
-        internal const string usernameProfileName = "Username";
-        internal const string passwordProfileName = "Password";
-        internal const string nuProfileName = "Relè_NU";
-        internal const string suProfileName = "Relè_SU";
-        internal const string ndProfileName = "Relè_ND";
-        internal const string sdProfileName = "Relè_SD";
+        // Legacy keys, read only to migrate a profile written by the previous version.
+        private const string LegacyComPortName = "COM Port";
+        private const string LegacyComPortDefault = "COM1";
+        private const string LegacyUsernameName = "Username";
+        private const string LegacyPasswordName = "Password";
+
+        // Returned by Profile.GetValue when a key does not exist.
+        private const string AbsentMarker = "\u0001<absent>";
+
+        private const string DriverName = "Clamshell IP Relay Dome";
+        private const string DriverSummary = "Clamshell shutter driven by an IP relay board.";
+        private const string DriverDetails = "The relay board gives no position feedback: the shutter state is estimated from the configured travel times.";
 
         private static string DriverProgId = ""; // ASCOM DeviceID (COM ProgID) for this driver, the value is set by the driver's class initialiser.
         private static string DriverDescription = ""; // The value is set by the driver's class initialiser.
-        internal static string comPort; // COM port name (if required)
         private static bool connectedState; // Local server's connected state
         private static bool runOnce = false; // Flag to enable "one-off" activities only to run once.
+        private static readonly object controllerSync = new object();
+
         internal static Util utilities; // ASCOM Utilities object for use as required
-        internal static AstroUtils astroUtilities; // ASCOM AstroUtilities object for use as required
+        internal static AstroUtils astroUtilities; // ASCOM AstroUtils object for use as required
         internal static TraceLogger tl; // Local server's trace logger object for diagnostic log with information that you specify
 
-        internal static string Username { get; set; }
-        internal static string Password { get; set; }
+        internal static DomeConfig Config = new DomeConfig(); // Current configuration, replaced by the setup dialog on OK
+        internal static ISecretProtector Protector = new DpapiSecretProtector(); // Protects the stored password (DPAPI, current user)
+        internal static DomeController Controller; // Created lazily, re-created after the configuration changes
 
-        internal static string Relè_NU { get; set; }
-        internal static string Relè_SU { get; set; }
-        internal static string Relè_ND { get; set; }
-        internal static string Relè_SD { get; set; }
+        private static readonly System.Action<string, string> ControllerLog = (identifier, message) => LogMessage(identifier, message);
 
         /// <summary>
         /// Initializes a new instance of the device Hardware class.
@@ -73,13 +72,13 @@ namespace ASCOM.Clamshell.Dome
                 // All other initialisation should go in the InitialiseHardware method.
                 tl = new TraceLogger("", "Clamshell.Hardware");
 
-                // DriverProgId has to be set here because it used by ReadProfile to get the TraceState flag.
-                DriverProgId = Dome.DriverProgId; // Get this device's ProgID so that it can be used to read the Profile configuration values
+                // DriverProgId has to be set here because it is used by ReadProfile.
+                DriverProgId = Dome.DriverProgId;
 
                 // ReadProfile has to go here before anything is written to the log because it loads the TraceLogger enable / disable state.
-                ReadProfile(); // Read device configuration from the ASCOM Profile store, including the trace state
+                ReadProfile();
 
-                LogMessage("DomeHardware", $"Static initialiser completed.");
+                LogMessage("DomeHardware", "Static initialiser completed.");
             }
             catch (Exception ex)
             {
@@ -90,32 +89,27 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// Place device initialisation code here that delivers the selected ASCOM <see cref="Devices."/>
+        /// Initialises the hardware class. Called every time a new ASCOM client loads the driver.
         /// </summary>
-        /// <remarks>Called every time a new instance of the driver is created.</remarks>
         internal static void InitialiseHardware()
         {
-            // This method will be called every time a new ASCOM client loads your driver
-            LogMessage("InitialiseHardware", $"Start.");
+            LogMessage("InitialiseHardware", "Start.");
 
             // Make sure that "one off" activities are only undertaken once
             if (runOnce == false)
             {
-                LogMessage("InitialiseHardware", $"Starting one-off initialisation.");
+                LogMessage("InitialiseHardware", "Starting one-off initialisation.");
 
                 DriverDescription = Dome.DriverDescription; // Get this device's Chooser description
 
                 LogMessage("InitialiseHardware", $"ProgID: {DriverProgId}, Description: {DriverDescription}");
 
                 connectedState = false; // Initialise connected to false
-                utilities = new Util(); //Initialise ASCOM Utilities object
+                utilities = new Util(); // Initialise ASCOM Utilities object
                 astroUtilities = new AstroUtils(); // Initialise ASCOM Astronomy Utilities object
 
                 LogMessage("InitialiseHardware", "Completed basic initialisation");
-
-                // Add your own "one off" device initialisation here e.g. validating existence of hardware and setting up communications
-
-                LogMessage("InitialiseHardware", $"One-off initialisation complete.");
+                LogMessage("InitialiseHardware", "One-off initialisation complete.");
                 runOnce = true; // Set the flag to ensure that this code is not run again
             }
         }
@@ -136,12 +130,18 @@ namespace ASCOM.Clamshell.Dome
             if (IsConnected)
                 MessageBox.Show("Already connected, just press OK");
 
-            using (SetupDialogForm F = new SetupDialogForm(tl))
+            using (SetupDialogForm form = new SetupDialogForm(tl, Config.Clone(), Protector))
             {
-                var result = F.ShowDialog();
-                if (result == DialogResult.OK)
+                if (form.ShowDialog() == DialogResult.OK && form.Result != null)
                 {
-                    WriteProfile(); // Persist device configuration values to the ASCOM Profile store
+                    Config = form.Result;
+                    WriteProfile(); // Persist the configuration to the ASCOM Profile store
+
+                    // The controller is re-created with the new configuration on next use.
+                    lock (controllerSync)
+                    {
+                        Controller = null;
+                    }
                 }
             }
         }
@@ -152,81 +152,69 @@ namespace ASCOM.Clamshell.Dome
         {
             get
             {
-                LogMessage("SupportedActions Get", "Returning empty ArrayList");
-                return new ArrayList();
+                ArrayList actions = new ArrayList { "SetAssumedState", "GetStateInfo" };
+                LogMessage("SupportedActions Get", $"Returning {actions.Count} actions.");
+                return actions;
             }
         }
 
         /// <summary>Invokes the specified device-specific custom action.</summary>
-        /// <param name="ActionName">A well known name agreed by interested parties that represents the action to be carried out.</param>
-        /// <param name="ActionParameters">List of required parameters or an <see cref="String.Empty">Empty String</see> if none are required.</param>
-        /// <returns>A string response. The meaning of returned strings is set by the driver author.
-        /// <para>Suppose filter wheels start to appear with automatic wheel changers; new actions could be <c>QueryWheels</c> and <c>SelectWheel</c>. The former returning a formatted list
-        /// of wheel names and the second taking a wheel name and making the change, returning appropriate values to indicate success or failure.</para>
-        /// </returns>
+        /// <param name="actionName">
+        /// <c>SetAssumedState</c> (parameter <c>open</c> or <c>closed</c>) records the shutter state when it is known by other means;
+        /// <c>GetStateInfo</c> returns a one-line summary of the controller state.
+        /// </param>
+        /// <param name="actionParameters">Action parameters, or an empty string if none are required.</param>
+        /// <returns>A string response.</returns>
         public static string Action(string actionName, string actionParameters)
         {
-            LogMessage("Action", $"Action {actionName}, parameters {actionParameters} is not implemented");
+            string name = (actionName ?? "").Trim();
+            string parameters = (actionParameters ?? "").Trim();
+            LogMessage("Action", $"Action {name}, parameters {parameters}");
+
+            if (string.Equals(name, "SetAssumedState", StringComparison.OrdinalIgnoreCase))
+            {
+                ShutterPhase phase;
+                if (string.Equals(parameters, "open", StringComparison.OrdinalIgnoreCase))
+                    phase = ShutterPhase.Open;
+                else if (string.Equals(parameters, "closed", StringComparison.OrdinalIgnoreCase))
+                    phase = ShutterPhase.Closed;
+                else
+                    throw new InvalidValueException("SetAssumedState", parameters, "open or closed");
+
+                GetController().SetAssumedState(phase);
+                return GetController().GetStateInfo();
+            }
+
+            if (string.Equals(name, "GetStateInfo", StringComparison.OrdinalIgnoreCase))
+                return GetController().GetStateInfo();
+
             throw new ActionNotImplementedException("Action " + actionName + " is not implemented by this driver");
         }
 
         /// <summary>
-        /// Transmits an arbitrary string to the device and does not wait for a response.
-        /// Optionally, protocol framing characters may be added to the string before transmission.
+        /// Transmits an arbitrary string to the device and does not wait for a response. Not supported by this driver.
         /// </summary>
-        /// <param name="Command">The literal command string to be transmitted.</param>
-        /// <param name="Raw">
-        /// if set to <c>true</c> the string is transmitted 'as-is'.
-        /// If set to <c>false</c> then protocol framing characters may be added prior to transmission.
-        /// </param>
         public static void CommandBlind(string command, bool raw)
         {
             CheckConnected("CommandBlind");
-            // TODO The optional CommandBlind method should either be implemented OR throw a MethodNotImplementedException
-            // If implemented, CommandBlind must send the supplied command to the mount and return immediately without waiting for a response
-
             throw new MethodNotImplementedException($"CommandBlind - Command:{command}, Raw: {raw}.");
         }
 
         /// <summary>
-        /// Transmits an arbitrary string to the device and waits for a boolean response.
-        /// Optionally, protocol framing characters may be added to the string before transmission.
+        /// Transmits an arbitrary string to the device and waits for a boolean response. Not supported by this driver.
         /// </summary>
-        /// <param name="Command">The literal command string to be transmitted.</param>
-        /// <param name="Raw">
-        /// if set to <c>true</c> the string is transmitted 'as-is'.
-        /// If set to <c>false</c> then protocol framing characters may be added prior to transmission.
-        /// </param>
-        /// <returns>
-        /// Returns the interpreted boolean response received from the device.
-        /// </returns>
         public static bool CommandBool(string command, bool raw)
         {
             CheckConnected("CommandBool");
-            // TODO The optional CommandBool method should either be implemented OR throw a MethodNotImplementedException
-            // If implemented, CommandBool must send the supplied command to the mount, wait for a response and parse this to return a True or False value
-
             throw new MethodNotImplementedException($"CommandBool - Command:{command}, Raw: {raw}.");
         }
 
         /// <summary>
-        /// Transmits an arbitrary string to the device and waits for a string response.
-        /// Optionally, protocol framing characters may be added to the string before transmission.
+        /// Transmits an arbitrary string to the device and waits for a string response. Not supported by this driver.
         /// </summary>
-        /// <param name="Command">The literal command string to be transmitted.</param>
-        /// <param name="Raw">
-        /// if set to <c>true</c> the string is transmitted 'as-is'.
-        /// If set to <c>false</c> then protocol framing characters may be added prior to transmission.
-        /// </param>
-        /// <returns>
-        /// Returns the string response received from the device.
-        /// </returns>
         public static string CommandString(string command, bool raw)
         {
             CheckConnected("CommandString");
-            // TODO The optional CommandString method should either be implemented OR throw a MethodNotImplementedException
-            // If implemented, CommandString must send the supplied command to the mount and wait for a response before returning this to the client
-
             throw new MethodNotImplementedException($"CommandString - Command:{command}, Raw: {raw}.");
         }
 
@@ -234,22 +222,12 @@ namespace ASCOM.Clamshell.Dome
         /// Deterministically release both managed and unmanaged resources that are used by this class.
         /// </summary>
         /// <remarks>
-        /// TODO: Release any managed or unmanaged resources that are used in this class.
-        /// 
-        /// Do not call this method from the Dispose method in your driver class.
-        ///
-        /// This is because this hardware class is decorated with the <see cref="HardwareClassAttribute"/> attribute and this Dispose() method will be called 
-        /// automatically by the  local server executable when it is irretrievably shutting down. This gives you the opportunity to release managed and unmanaged 
-        /// resources in a timely fashion and avoid any time delay between local server close down and garbage collection by the .NET runtime.
-        ///
-        /// For the same reason, do not call the SharedResources.Dispose() method from this method. Any resources used in the static shared resources class
-        /// itself should be released in the SharedResources.Dispose() method as usual. The SharedResources.Dispose() method will be called automatically 
-        /// by the local server just before it shuts down.
-        /// 
+        /// Do not call this method from the Dispose method in the driver class: this hardware class is decorated with
+        /// the <see cref="HardwareClassAttribute"/> attribute and the local server calls this method when it shuts down.
         /// </remarks>
         public static void Dispose()
         {
-            try { LogMessage("Dispose", $"Disposing of assets and closing down."); } catch { }
+            try { LogMessage("Dispose", "Disposing of assets and closing down."); } catch { }
 
             try
             {
@@ -277,7 +255,7 @@ namespace ASCOM.Clamshell.Dome
 
         /// <summary>
         /// Set True to connect to the device hardware. Set False to disconnect from the device hardware.
-        /// You can also read the property to check whether it is connected. This reports the current hardware state.
+        /// Connecting checks the configuration and that the relay host is reachable over TCP. No command is sent.
         /// </summary>
         /// <value><c>true</c> if connected to the hardware; otherwise, <c>false</c>.</value>
         public static bool Connected
@@ -295,18 +273,26 @@ namespace ASCOM.Clamshell.Dome
 
                 if (value)
                 {
-                    LogMessage("Connected Set", $"Connecting to port {comPort}");
+                    List<string> problems;
+                    if (!Config.Validate(out problems))
+                        throw new DriverException("Dome is not configured: " + string.Join("; ", problems));
 
-                    // TODO insert connect to the device code here
+                    if (!Config.SimulationMode)
+                    {
+                        string error;
+                        if (!Reachability.TryTcpConnect(Config.Host, Config.UseHttps, Config.RequestTimeoutMs, out error))
+                        {
+                            LogMessage("Connected Set", $"Cannot reach host {Config.Host}: {error}");
+                            throw new DriverException($"cannot reach host {Config.Host}: {error}");
+                        }
+                    }
 
+                    LogMessage("Connected Set", Config.SimulationMode ? "Connected (simulation mode)." : $"Connected, host {Config.Host} is reachable.");
                     connectedState = true;
                 }
                 else
                 {
-                    LogMessage("Connected Set", $"Disconnecting from port {comPort}");
-
-                    // TODO insert disconnect from the device code here
-
+                    LogMessage("Connected Set", "Disconnected.");
                     connectedState = false;
                 }
             }
@@ -318,11 +304,11 @@ namespace ASCOM.Clamshell.Dome
         /// <value>The description.</value>
         public static string Description
         {
-            // TODO customise this device description if required
             get
             {
-                LogMessage("Description Get", DriverDescription);
-                return DriverDescription;
+                string description = DriverSummary + " " + DriverDetails;
+                LogMessage("Description Get", description);
+                return description;
             }
         }
 
@@ -334,8 +320,7 @@ namespace ASCOM.Clamshell.Dome
             get
             {
                 Version version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
-                // TODO customise this driver description if required
-                string driverInfo = $"Information about the driver itself. Version: {version.Major}.{version.Minor}";
+                string driverInfo = $"{DriverName} ASCOM Dome driver. Version: {version.Major}.{version.Minor}. {DriverSummary} {DriverDetails}";
                 LogMessage("DriverInfo Get", driverInfo);
                 return driverInfo;
             }
@@ -360,7 +345,6 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         public static short InterfaceVersion
         {
-            // set by the driver wizard
             get
             {
                 LogMessage("InterfaceVersion Get", "2");
@@ -373,12 +357,10 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         public static string Name
         {
-            // TODO customise this device name as required
             get
             {
-                string name = "Short driver name - please customise";
-                LogMessage("Name Get", name);
-                return name;
+                LogMessage("Name Get", DriverName);
+                return DriverName;
             }
         }
 
@@ -386,15 +368,15 @@ namespace ASCOM.Clamshell.Dome
 
         #region IDome Implementation
 
-        private static bool domeShutterState = false; // Variable to hold the open/closed status of the shutter, true = Open
-
         /// <summary>
         /// Immediately stops any and all movement of the dome.
         /// </summary>
+        /// <remarks>
+        /// Not supported: each relay command is a single pulse that cannot be interrupted, so the call only logs.
+        /// </remarks>
         internal static void AbortSlew()
         {
-            // This is a mandatory parameter but we have no action to take in this simple driver
-            LogMessage("AbortSlew", "Completed");
+            LogMessage("AbortSlew", "Not supported by the relay board (each command is a single pulse). Nothing was sent.");
         }
 
         /// <summary>
@@ -410,17 +392,7 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// <para><see langword="true" /> when the dome is in the home position. Raises an error if not supported.</para>
-        /// <para>
-        /// This is normally used following a <see cref="FindHome" /> operation. The value is reset
-        /// with any azimuth slew operation that moves the dome away from the home position.
-        /// </para>
-        /// <para>
-        /// <see cref="AtHome" /> may optionally also become true during normal slew operations, if the
-        /// dome passes through the home position and the dome controller hardware is capable of
-        /// detecting that; or at the end of a slew operation if the dome comes to rest at the home
-        /// position.
-        /// </para>
+        /// <see langword="true" /> when the dome is in the home position. Raises an error if not supported.
         /// </summary>
         internal static bool AtHome
         {
@@ -492,7 +464,7 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// <see langword="true" /> if driver is capable of rotating the dome. Muste be <see "langword="false" /> for a 
+        /// <see langword="true" /> if driver is capable of rotating the dome. Must be <see langword="false" /> for a
         /// roll-off roof or clamshell.
         /// </summary>
         internal static bool CanSetAzimuth
@@ -517,8 +489,7 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// <see langword="true" /> if the driver is capable of opening and closing the shutter or roof
-        /// mechanism.
+        /// <see langword="true" /> if the driver is capable of opening and closing the shutter or roof mechanism.
         /// </summary>
         internal static bool CanSetShutter
         {
@@ -559,8 +530,8 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         internal static void CloseShutter()
         {
-            LogMessage("CloseShutter", "Shutter has been closed");
-            domeShutterState = false;
+            LogMessage("CloseShutter", "Closing the shutter.");
+            Execute("CloseShutter", () => GetController().Close());
         }
 
         /// <summary>
@@ -577,8 +548,8 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         internal static void OpenShutter()
         {
-            LogMessage("OpenShutter", "Shutter has been opened");
-            domeShutterState = true;
+            LogMessage("OpenShutter", "Opening the shutter.");
+            Execute("OpenShutter", () => GetController().Open());
         }
 
         /// <summary>
@@ -600,23 +571,15 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// Gets the status of the dome shutter or roof structure.
+        /// Gets the status of the dome shutter or roof structure. The state is estimated from the travel times.
         /// </summary>
         internal static ShutterState ShutterStatus
         {
             get
             {
-                LogMessage("ShutterStatus Get", false.ToString());
-                if (domeShutterState)
-                {
-                    LogMessage("ShutterStatus", ShutterState.shutterOpen.ToString());
-                    return ShutterState.shutterOpen;
-                }
-                else
-                {
-                    LogMessage("ShutterStatus", ShutterState.shutterClosed.ToString());
-                    return ShutterState.shutterClosed;
-                }
+                ShutterState state = ToShutterState(GetController().Phase);
+                LogMessage("ShutterStatus", state.ToString());
+                return state;
             }
         }
 
@@ -651,7 +614,6 @@ namespace ASCOM.Clamshell.Dome
 
         /// <summary>
         /// Ensure that the requested viewing azimuth is available for observing.
-        /// The method should not block and the slew operation should complete asynchronously.
         /// </summary>
         /// <param name="Azimuth">
         /// Desired viewing azimuth (degrees, North zero and increasing clockwise. i.e., 90 East,
@@ -664,9 +626,9 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// <see langword="true" /> if any part of the dome is currently moving or a move command has been issued, 
+        /// <see langword="true" /> if any part of the dome is currently moving or a move command has been issued,
         /// but the dome has not yet started to move. <see langword="false" /> if all dome components are stationary
-        /// and no move command has been issued. /> 
+        /// and no move command has been issued.
         /// </summary>
         internal static bool Slewing
         {
@@ -693,16 +655,14 @@ namespace ASCOM.Clamshell.Dome
         #endregion
 
         #region Private properties and methods
-        // Useful methods that can be used as required to help with driver development
 
         /// <summary>
-        /// Returns true if there is a valid connection to the driver hardware
+        /// Returns true if the driver is connected (see <see cref="Connected"/>).
         /// </summary>
         private static bool IsConnected
         {
             get
             {
-                // TODO check that the driver hardware connection exists and is connected to the hardware
                 return connectedState;
             }
         }
@@ -720,45 +680,221 @@ namespace ASCOM.Clamshell.Dome
         }
 
         /// <summary>
-        /// Read the device configuration from the ASCOM Profile store
+        /// Returns the controller, creating it on first use with the current configuration.
         /// </summary>
-        internal static void ReadProfile()
+        private static DomeController GetController()
         {
-            using (Profile driverProfile = new Profile())
+            lock (controllerSync)
             {
-                driverProfile.DeviceType = "Dome";
-                tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(DriverProgId, traceStateProfileName, string.Empty, traceStateDefault));
-                comPort = driverProfile.GetValue(DriverProgId, comPortProfileName, string.Empty, comPortDefault);
+                if (Controller == null)
+                {
+                    IPulseSender sender = Config.SimulationMode
+                        ? (IPulseSender)new SimulatedPulseSender(ControllerLog)
+                        : new HttpPulseSender(ControllerLog);
 
-                //Leggipwd GPT
-                Username = driverProfile.GetValue(DriverProgId, usernameProfileName, string.Empty, string.Empty);
-                Password = driverProfile.GetValue(DriverProgId, passwordProfileName, string.Empty, string.Empty);
-                Relè_ND = driverProfile.GetValue(DriverProgId, ndProfileName, string.Empty, string.Empty);
-                Relè_NU = driverProfile.GetValue(DriverProgId, nuProfileName, string.Empty, string.Empty);
-                Relè_SD = driverProfile.GetValue(DriverProgId, sdProfileName, string.Empty, string.Empty);
-                Relè_SU = driverProfile.GetValue(DriverProgId, suProfileName, string.Empty, string.Empty);
+                    Controller = new DomeController(() => Config, sender, Protector, new ProfileStateStore(), ControllerLog, () => DateTime.UtcNow);
+                }
+
+                return Controller;
             }
         }
 
         /// <summary>
-        /// Write the device configuration to the  ASCOM  Profile store
+        /// Runs a controller command and converts its failures into ASCOM exceptions for the client.
         /// </summary>
-        internal static void WriteProfile()
+        private static void Execute(string identifier, System.Action command)
+        {
+            try
+            {
+                command();
+            }
+            catch (DomeCommandException ex)
+            {
+                LogMessage(identifier, $"Command failed: {ex.Message}");
+                throw new DriverException(ex.Message, ex);
+            }
+        }
+
+        private static ShutterState ToShutterState(ShutterPhase phase)
+        {
+            switch (phase)
+            {
+                case ShutterPhase.Open:
+                    return ShutterState.shutterOpen;
+                case ShutterPhase.Opening:
+                    return ShutterState.shutterOpening;
+                case ShutterPhase.Closing:
+                    return ShutterState.shutterClosing;
+                case ShutterPhase.Error:
+                    return ShutterState.shutterError;
+                default:
+                    return ShutterState.shutterClosed;
+            }
+        }
+
+        /// <summary>
+        /// Reads the configuration from the ASCOM Profile store. Migrates the legacy format when the "Config" key is absent.
+        /// Invalid stored data never throws: the configuration falls back to an empty one and the problem is logged.
+        /// </summary>
+        internal static void ReadProfile()
+        {
+            bool migrated = false;
+            try
+            {
+                using (Profile driverProfile = new Profile())
+                {
+                    driverProfile.DeviceType = "Dome";
+
+                    string json = driverProfile.GetValue(DriverProgId, ConfigProfileName, string.Empty, AbsentMarker);
+                    if (json != AbsentMarker)
+                    {
+                        Config = ParseConfig(json);
+                    }
+                    else
+                    {
+                        Config = MigrateLegacyProfile(driverProfile);
+                        migrated = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Config = new DomeConfig();
+                LogMessage("ReadProfile", $"Cannot read the ASCOM Profile, using an empty configuration: {ex.Message}");
+            }
+
+            if (tl != null)
+                tl.Enabled = Config.TraceEnabled;
+
+            if (migrated)
+            {
+                try
+                {
+                    WriteProfile(); // writes the Config key first
+                    ClearLegacyPassword(); // the plain text password must not stay in the profile
+                    LogMessage("ReadProfile", "Migrated the legacy profile to the new configuration format.");
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("ReadProfile", $"Legacy profile migration could not be saved: {ex.Message}");
+                }
+            }
+        }
+
+        private static DomeConfig ParseConfig(string json)
+        {
+            try
+            {
+                return ConfigSerializer.FromJson(json) ?? new DomeConfig();
+            }
+            catch (Exception ex)
+            {
+                LogMessage("ReadProfile", $"Stored configuration is not valid, starting with an empty configuration: {ex.Message}");
+                return new DomeConfig();
+            }
+        }
+
+        private static DomeConfig MigrateLegacyProfile(Profile driverProfile)
+        {
+            // The legacy "COM Port" key held the IP address; its default "COM1" means "not set".
+            string host = (driverProfile.GetValue(DriverProgId, LegacyComPortName, string.Empty, string.Empty) ?? "").Trim();
+            if (string.Equals(host, LegacyComPortDefault, StringComparison.OrdinalIgnoreCase))
+                host = "";
+
+            string username = (driverProfile.GetValue(DriverProgId, LegacyUsernameName, string.Empty, string.Empty) ?? "").Trim();
+            string password = driverProfile.GetValue(DriverProgId, LegacyPasswordName, string.Empty, string.Empty) ?? "";
+
+            DomeConfig config = new DomeConfig();
+            config.Host = host;
+            config.Username = username;
+            config.TraceEnabled = ReadTraceState(driverProfile);
+
+            // The actions are left empty on purpose: the user enters them in the setup dialog.
+            if (password.Length > 0)
+            {
+                try
+                {
+                    config.SetPassword(password, Protector);
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("ReadProfile", $"The legacy password could not be protected and was not migrated: {ex.Message}");
+                }
+            }
+
+            return config;
+        }
+
+        private static bool ReadTraceState(Profile driverProfile)
+        {
+            string value = driverProfile.GetValue(DriverProgId, traceStateProfileName, string.Empty, traceStateDefault);
+            bool result;
+            return bool.TryParse(value, out result) ? result : true;
+        }
+
+        private static void ClearLegacyPassword()
         {
             using (Profile driverProfile = new Profile())
             {
                 driverProfile.DeviceType = "Dome";
-                driverProfile.WriteValue(DriverProgId, traceStateProfileName, tl.Enabled.ToString());
-                driverProfile.WriteValue(DriverProgId, comPortProfileName, comPort.ToString());
+                driverProfile.WriteValue(DriverProgId, LegacyPasswordName, string.Empty);
+            }
+        }
 
-                //Salva pwd GPT
-                driverProfile.WriteValue(DriverProgId, usernameProfileName, Username);
-                driverProfile.WriteValue(DriverProgId, passwordProfileName, Password);
-                driverProfile.WriteValue(DriverProgId, ndProfileName, Relè_ND);
-                driverProfile.WriteValue(DriverProgId, nuProfileName, Relè_NU); 
-                driverProfile.WriteValue(DriverProgId, sdProfileName, Relè_SD);
-                driverProfile.WriteValue(DriverProgId, suProfileName, Relè_SU);
+        /// <summary>
+        /// Write the configuration to the ASCOM Profile store and align the trace logger with it.
+        /// </summary>
+        internal static void WriteProfile()
+        {
+            string json = ConfigSerializer.ToJson(Config);
 
+            using (Profile driverProfile = new Profile())
+            {
+                driverProfile.DeviceType = "Dome";
+                driverProfile.WriteValue(DriverProgId, ConfigProfileName, json);
+                driverProfile.WriteValue(DriverProgId, traceStateProfileName, Config.TraceEnabled.ToString());
+            }
+
+            if (tl != null)
+                tl.Enabled = Config.TraceEnabled;
+        }
+
+        /// <summary>
+        /// Persists the controller state string in the ASCOM Profile (key "State").
+        /// </summary>
+        private sealed class ProfileStateStore : IStateStore
+        {
+            public string Load()
+            {
+                try
+                {
+                    using (Profile driverProfile = new Profile())
+                    {
+                        driverProfile.DeviceType = "Dome";
+                        return driverProfile.GetValue(DriverProgId, StateProfileName, string.Empty, string.Empty) ?? "";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("ProfileStateStore", $"Cannot read the saved shutter state: {ex.Message}");
+                    return "";
+                }
+            }
+
+            public void Save(string value)
+            {
+                try
+                {
+                    using (Profile driverProfile = new Profile())
+                    {
+                        driverProfile.DeviceType = "Dome";
+                        driverProfile.WriteValue(DriverProgId, StateProfileName, value ?? "");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("ProfileStateStore", $"Cannot save the shutter state: {ex.Message}");
+                }
             }
         }
 
@@ -783,7 +919,7 @@ namespace ASCOM.Clamshell.Dome
             var msg = string.Format(message, args);
             LogMessage(identifier, msg);
         }
+
         #endregion
     }
 }
-

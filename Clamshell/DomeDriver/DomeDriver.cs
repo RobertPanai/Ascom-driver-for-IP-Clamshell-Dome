@@ -1,10 +1,7 @@
-// TODO fill in this information for your driver, then remove this line!
+// ASCOM Dome driver for the Clamshell IP relay dome.
 //
-// ASCOM Dome driver for Clamshell
-//
-// Description:	 <To be completed by driver developer>
-//
-// Implements:	ASCOM Dome interface version: <To be completed by driver developer>
+// Description:	Presentation layer for the ASCOM Dome interface. Device logic lives in DomeHardware.
+// Implements:	ASCOM Dome interface version: 2
 // Author:		Robert Panai - robertpanai96@gmail.com
 //
 
@@ -16,9 +13,6 @@ using System;
 using System.Collections;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using System.Net;
-using System.Threading;
-using System.IO;
 
 namespace ASCOM.Clamshell.Dome
 {
@@ -510,8 +504,6 @@ namespace ASCOM.Clamshell.Dome
         /// <summary>
         /// Immediately stops any and all movement of the dome.
         /// </summary>
-        /// 
-        private bool domeState = false; //set false by default
         public void AbortSlew()
         {
             try
@@ -810,54 +802,6 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         public void CloseShutter()
         {
-            // Definizione delle credenziali di autenticazione
-            //string username = "ftp"; // Sostituisci con il nome utente reale
-            //string password = "ftp"; // Sostituisci con la password reale
-            string username = DomeHardware.Username;
-            string password = DomeHardware.Password;
-            string nu_port = DomeHardware.Relè_NU;
-            string su_port = DomeHardware.Relè_SU;
-            
-
-            // Metodo per inviare la richiesta HTTP
-            void SendRequest(string led)
-            {
-                string remoteUrl = $"http://{DomeHardware.comPort}/protect/leds.cgi?led={led}";
-                HttpWebRequest httpRequest = (HttpWebRequest)WebRequest.Create(remoteUrl);
-
-                // Aggiungi credenziali di autenticazione
-                httpRequest.Credentials = new NetworkCredential(username, password);
-
-                try
-                {
-                    using (WebResponse response = httpRequest.GetResponse())
-                    {
-                        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
-                        {
-                            string responseText = reader.ReadToEnd();
-                            LogMessage($"SendRequest for LED {led}", $"Response received: {responseText}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage($"SendRequest for LED {led}", $"Threw an exception: \r\n{ex}");
-                }
-            }
-
-            // Crea e avvia i thread per le richieste parallele
-            Thread threadLed4 = new Thread(() => SendRequest("4"));
-            Thread threadLed2 = new Thread(() => SendRequest("2"));
-
-            threadLed4.Start();
-            threadLed2.Start();
-
-            // Attendi che entrambi i thread abbiano completato
-            threadLed4.Join();
-            threadLed2.Join();
-
-            // Operazioni successive
-            domeState = false;
             try
             {
                 CheckConnected("CloseShutter");
@@ -896,54 +840,6 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         public void OpenShutter()
         {
-            // Definizione delle credenziali di autenticazione
-            //string username = "ftp"; // Sostituisci con il nome utente reale
-            //string password = "ftp"; // Sostituisci con la password reale
-            string username = DomeHardware.Username;
-            string password = DomeHardware.Password;
-            string nu_port = DomeHardware.Relè_NU;
-            string su_port = DomeHardware.Relè_SU;
-
-
-            // Metodo per inviare la richiesta HTTP
-            void SendRequest(string led)
-            {
-                string remoteUrl = $"http://{DomeHardware.comPort}/protect/leds.cgi?led={led}";
-                HttpWebRequest httpRequest = (HttpWebRequest)WebRequest.Create(remoteUrl);
-
-                // Aggiungi credenziali di autenticazione
-                httpRequest.Credentials = new NetworkCredential(username, password);
-
-                try
-                {
-                    using (WebResponse response = httpRequest.GetResponse())
-                    {
-                        using (StreamReader reader = new StreamReader(response.GetResponseStream()))
-                        {
-                            string responseText = reader.ReadToEnd();
-                            LogMessage($"SendRequest for LED {led}", $"Response received: {responseText}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    LogMessage($"SendRequest for LED {led}", $"Threw an exception: \r\n{ex}");
-                }
-            }
-
-            // Crea e avvia i thread per le richieste parallele
-            Thread threadLed5 = new Thread(() => SendRequest("5"));
-            Thread threadLed3 = new Thread(() => SendRequest("3"));
-
-            threadLed5.Start();
-            threadLed3.Start();
-
-            // Attendi che entrambi i thread abbiano completato
-            threadLed5.Join();
-            threadLed3.Join();
-
-            // Operazioni successive
-            domeState = true;
             try
             {
                 CheckConnected("OpenShutter");
