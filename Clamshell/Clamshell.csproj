@@ -76,7 +76,7 @@
   <ItemGroup>
     <Compile Include="ClassFactory.cs" />
     <Compile Include="DomeDriver\DomeDriver.cs" />
-    <Compile Include="DomeDriver\DomeHardware..cs" />
+    <Compile Include="DomeDriver\DomeHardware.cs" />
     <Compile Include="frmMain.cs">
       <SubType>Form</SubType>
     </Compile>

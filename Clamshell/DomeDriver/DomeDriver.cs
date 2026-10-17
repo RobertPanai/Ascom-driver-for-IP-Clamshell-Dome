@@ -815,8 +815,8 @@ namespace ASCOM.Clamshell.Dome
             //string password = "ftp"; // Sostituisci con la password reale
             string username = DomeHardware.Username;
             string password = DomeHardware.Password;
-            string nu_port = DomeHardware.Relè_NU;
-            string su_port = DomeHardware.Relè_SU;
+            string nu_port = DomeHardware.RelÃ¨_NU;
+            string su_port = DomeHardware.RelÃ¨_SU;
             
 
             // Metodo per inviare la richiesta HTTP
@@ -901,8 +901,8 @@ namespace ASCOM.Clamshell.Dome
             //string password = "ftp"; // Sostituisci con la password reale
             string username = DomeHardware.Username;
             string password = DomeHardware.Password;
-            string nu_port = DomeHardware.Relè_NU;
-            string su_port = DomeHardware.Relè_SU;
+            string nu_port = DomeHardware.RelÃ¨_NU;
+            string su_port = DomeHardware.RelÃ¨_SU;
 
 
             // Metodo per inviare la richiesta HTTP

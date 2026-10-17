@@ -188,7 +188,7 @@ namespace ASCOM.Clamshell.Dome
             this.label5.Name = "label5";
             this.label5.Size = new System.Drawing.Size(72, 13);
             this.label5.TabIndex = 16;
-            this.label5.Text = "Nord Up Relè";
+            this.label5.Text = "Nord Up RelÃ¨";
             this.label5.Click += new System.EventHandler(this.label5_Click);
             // 
             // label6
@@ -198,7 +198,7 @@ namespace ASCOM.Clamshell.Dome
             this.label6.Name = "label6";
             this.label6.Size = new System.Drawing.Size(68, 13);
             this.label6.TabIndex = 17;
-            this.label6.Text = "Sud Up Relè";
+            this.label6.Text = "Sud Up RelÃ¨";
             // 
             // label7
             // 
@@ -207,7 +207,7 @@ namespace ASCOM.Clamshell.Dome
             this.label7.Name = "label7";
             this.label7.Size = new System.Drawing.Size(86, 13);
             this.label7.TabIndex = 18;
-            this.label7.Text = "Nord Down Relè";
+            this.label7.Text = "Nord Down RelÃ¨";
             // 
             // label8
             // 
@@ -216,7 +216,7 @@ namespace ASCOM.Clamshell.Dome
             this.label8.Name = "label8";
             this.label8.Size = new System.Drawing.Size(82, 13);
             this.label8.TabIndex = 19;
-            this.label8.Text = "Sud Down Relè";
+            this.label8.Text = "Sud Down RelÃ¨";
             this.label8.Click += new System.EventHandler(this.label8_Click);
             // 
             // advancedpanel

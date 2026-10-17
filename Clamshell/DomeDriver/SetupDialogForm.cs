@@ -29,10 +29,10 @@ namespace ASCOM.Clamshell.Dome
             DomeHardware.comPort = IPAddress.Text;
             DomeHardware.Password = textbox_password.Text;
             DomeHardware.Username = textbox_username.Text;
-            DomeHardware.Relè_NU = textbox_nu.Text;
-            DomeHardware.Relè_SU = textbox_su.Text;
-            DomeHardware.Relè_ND = textbox_nd.Text;
-            DomeHardware.Relè_SD = textbox_sd.Text;
+            DomeHardware.RelÃ¨_NU = textbox_nu.Text;
+            DomeHardware.RelÃ¨_SU = textbox_su.Text;
+            DomeHardware.RelÃ¨_ND = textbox_nd.Text;
+            DomeHardware.RelÃ¨_SD = textbox_sd.Text;
 
             DomeHardware.WriteProfile();
             //tl.Enabled = chkTrace.Checked;
@@ -81,10 +81,10 @@ namespace ASCOM.Clamshell.Dome
             IPAddress.Text = DomeHardware.comPort;
             textbox_password.Text = DomeHardware.Password;
             textbox_username.Text = DomeHardware.Username;
-            textbox_nu.Text = DomeHardware.Relè_NU;
-            textbox_su.Text = DomeHardware.Relè_SU;
-            textbox_nd.Text = DomeHardware.Relè_ND;
-            textbox_sd.Text = DomeHardware.Relè_SD;
+            textbox_nu.Text = DomeHardware.RelÃ¨_NU;
+            textbox_su.Text = DomeHardware.RelÃ¨_SU;
+            textbox_nd.Text = DomeHardware.RelÃ¨_ND;
+            textbox_sd.Text = DomeHardware.RelÃ¨_SD;
         }
 
         private void SetupDialogForm_Load(object sender, EventArgs e)

@@ -1,0 +1,18 @@
+# Build output
+bin/
+obj/
+*.exe
+*.pdb
+*.cache
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# macOS / editors
+.DS_Store
+*.swp
+
+# Local test artefacts
+TestResults/
