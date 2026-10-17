@@ -28,6 +28,8 @@ namespace ASCOM.Clamshell.Dome
             Add("header.author", "by Robert Panai", "di Robert Panai");
             Add("tip.ascom", "Open ascom-standards.org", "Apri ascom-standards.org");
             Add("msg.error", "Error", "Errore");
+            Add("AlreadyConnected", "The dome is connected: disconnect it from the client application before changing the settings.",
+                                     "La cupola è connessa: disconnettila dall'applicazione prima di modificare le impostazioni.");
             Add("msg.not_valid", "The configuration is not valid: fix the items shown in red.",
                                  "La configurazione non è valida: correggi gli elementi in rosso.");
             Add("msg.ascom_fail", "Could not open the browser: {0}", "Impossibile aprire il browser: {0}");
@@ -66,6 +68,9 @@ namespace ASCOM.Clamshell.Dome
             Add("conn.pass_saved", "A password is saved. Leave the box empty to keep it.",
                                    "Una password è salvata. Lascia la casella vuota per mantenerla.");
             Add("conn.pass_none", "No password saved.", "Nessuna password salvata.");
+            Add("conn.pass_will_change", "The new password is protected and saved when you press OK.",
+                                         "La nuova password viene protetta e salvata quando premi OK.");
+            Add("msg.error_detail", "Error: {0}", "Errore: {0}");
             Add("conn.show_pass", "Show", "Mostra");
             Add("conn.test", "Test connection", "Verifica connessione");
             Add("conn.test_note", "Only a TCP connection is tested. No command is sent.",
@@ -102,9 +107,13 @@ namespace ASCOM.Clamshell.Dome
             Add("cmd.preview_empty", "(no steps defined)", "(nessun passo definito)");
             Add("cmd.preview_nohost", "(type the host on the Connection tab to see the URLs)",
                                       "(inserisci l'host nella scheda Connessione per vedere gli URL)");
-            Add("cmd.preview_line", "{0}: {1}", "{0}: {1}");
+            Add("cmd.preview_line", "{0}. {1}", "{0}. {1}");
             Add("cmd.open_label", "Open", "Apertura");
             Add("cmd.close_label", "Close", "Chiusura");
+            Add("cmd.mode_parallel", "all steps at once", "tutti i passi insieme");
+            Add("cmd.mode_sequential", "one step after the other", "un passo dopo l'altro");
+            Add("cmd.relink_confirm", "Overwrite the steps edited by hand with the values of the quick builder?",
+                                      "Sovrascrivere i passi modificati a mano con i valori del generatore rapido?");
 
             // ---- tab 3: timing and status ----
             Add("time.open", "Open travel time (s)", "Tempo di corsa in apertura (s)");

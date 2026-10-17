@@ -18,6 +18,10 @@ namespace ASCOM.Clamshell.Core
         private const int MaxErrorChars = 500;
         private const string LogCategory = "Controller";
 
+        // _commandLock serializes commands (two clients can never fire pulses at the same time).
+        // _lock only protects the in-memory state and is never held while a request is on the wire,
+        // so reading the status stays instant even while a command is being sent.
+        private readonly object _commandLock = new object();
         private readonly object _lock = new object();
         private readonly Func<DomeConfig> _configProvider;
         private readonly IPulseSender _sender;
@@ -30,6 +34,8 @@ namespace ASCOM.Clamshell.Core
         private ShutterPhase _phase = ShutterPhase.Closed;
         private DateTime _endTimeUtc = default(DateTime);
         private string _lastError = "";
+        private bool _sending;
+        private ShutterPhase _pendingPhase = ShutterPhase.Closed;
 
         /// <summary>
         /// Creates the controller and restores the persisted state. Never throws: any problem while
@@ -71,6 +77,10 @@ namespace ASCOM.Clamshell.Core
             {
                 lock (_lock)
                 {
+                    if (_sending)
+                    {
+                        return _pendingPhase;
+                    }
                     SettleLocked();
                     return _phase;
                 }
@@ -113,27 +123,27 @@ namespace ASCOM.Clamshell.Core
         /// </summary>
         public void Open()
         {
-            lock (_lock)
+            lock (_commandLock)
             {
                 DomeConfig config = ReadValidConfig();
-                SettleLocked();
-
-                switch (_phase)
+                lock (_lock)
                 {
-                    case ShutterPhase.Open:
-                    case ShutterPhase.Opening:
-                        Log("open requested but already " + _phase.ToString().ToLowerInvariant() + ", no pulse sent");
-                        return;
+                    SettleLocked();
+                    switch (_phase)
+                    {
+                        case ShutterPhase.Open:
+                        case ShutterPhase.Opening:
+                            Log("open requested but already " + _phase.ToString().ToLowerInvariant() + ", no pulse sent");
+                            return;
 
-                    case ShutterPhase.Closing:
-                        Log("open refused: shutter is closing");
-                        throw new DomeCommandException("Shutter is closing, wait until it has finished");
-
-                    default:
-                        // Closed or Error
-                        RunTransition(config, config.OpenAction, "Open", ShutterPhase.Opening, config.OpenTravelSeconds);
-                        return;
+                        case ShutterPhase.Closing:
+                            Log("open refused: shutter is closing");
+                            throw new DomeCommandException("Shutter is closing, wait until it has finished");
+                    }
                 }
+
+                // Closed or Error
+                RunTransition(config, config.OpenAction, "Open", ShutterPhase.Opening, config.OpenTravelSeconds);
             }
         }
 
@@ -143,27 +153,27 @@ namespace ASCOM.Clamshell.Core
         /// </summary>
         public void Close()
         {
-            lock (_lock)
+            lock (_commandLock)
             {
                 DomeConfig config = ReadValidConfig();
-                SettleLocked();
-
-                switch (_phase)
+                lock (_lock)
                 {
-                    case ShutterPhase.Closed:
-                    case ShutterPhase.Closing:
-                        Log("close requested but already " + _phase.ToString().ToLowerInvariant() + ", no pulse sent");
-                        return;
+                    SettleLocked();
+                    switch (_phase)
+                    {
+                        case ShutterPhase.Closed:
+                        case ShutterPhase.Closing:
+                            Log("close requested but already " + _phase.ToString().ToLowerInvariant() + ", no pulse sent");
+                            return;
 
-                    case ShutterPhase.Opening:
-                        Log("close refused: shutter is opening");
-                        throw new DomeCommandException("Shutter is opening, wait until it has finished");
-
-                    default:
-                        // Open or Error
-                        RunTransition(config, config.CloseAction, "Close", ShutterPhase.Closing, config.CloseTravelSeconds);
-                        return;
+                        case ShutterPhase.Opening:
+                            Log("close refused: shutter is opening");
+                            throw new DomeCommandException("Shutter is opening, wait until it has finished");
+                    }
                 }
+
+                // Open or Error
+                RunTransition(config, config.CloseAction, "Close", ShutterPhase.Closing, config.CloseTravelSeconds);
             }
         }
 
@@ -176,13 +186,16 @@ namespace ASCOM.Clamshell.Core
                 throw new ArgumentException("Assumed state must be Open or Closed", "phase");
             }
 
-            lock (_lock)
+            lock (_commandLock)
             {
-                _phase = phase;
-                _endTimeUtc = default(DateTime);
-                _lastError = "";
-                Persist();
-                Log("state set manually to " + phase);
+                lock (_lock)
+                {
+                    _phase = phase;
+                    _endTimeUtc = default(DateTime);
+                    _lastError = "";
+                    Persist();
+                    Log("state set manually to " + phase);
+                }
             }
         }
 
@@ -191,6 +204,10 @@ namespace ASCOM.Clamshell.Core
         {
             lock (_lock)
             {
+                if (_sending)
+                {
+                    return _pendingPhase + " (command being sent)";
+                }
                 SettleLocked();
                 switch (_phase)
                 {
@@ -207,25 +224,48 @@ namespace ASCOM.Clamshell.Core
             }
         }
 
-        /// <summary>Runs an action and moves to the target phase on success, or to Error on failure.</summary>
+        /// <summary>
+        /// Runs an action and moves to the target phase on success, or to Error on failure.
+        /// Must be called with _commandLock held and WITHOUT _lock: the requests are sent outside the state lock.
+        /// </summary>
         private void RunTransition(DomeConfig config, DomeAction action, string label, ShutterPhase target, int travelSeconds)
         {
-            string error;
-            if (ExecuteAction(config, action, label, out error))
+            lock (_lock)
             {
-                _phase = target;
-                _endTimeUtc = Now().AddSeconds(travelSeconds);
-                _lastError = "";
-                Persist();
-                Log(label + " sent, estimated travel " + travelSeconds.ToString(CultureInfo.InvariantCulture) + " s");
-                return;
+                _sending = true;
+                _pendingPhase = target;
             }
 
-            _phase = ShutterPhase.Error;
-            _endTimeUtc = default(DateTime);
-            _lastError = OneLine(error);
-            Persist();
-            throw new DomeCommandException(_lastError);
+            string error = "";
+            bool ok = false;
+            try
+            {
+                ok = ExecuteAction(config, action, label, out error);
+            }
+            catch (Exception ex)
+            {
+                error = label + " failed unexpectedly: " + ex.Message;
+            }
+
+            lock (_lock)
+            {
+                _sending = false;
+                if (ok)
+                {
+                    _phase = target;
+                    _endTimeUtc = Now().AddSeconds(travelSeconds);
+                    _lastError = "";
+                    Persist();
+                    Log(label + " sent, estimated travel " + travelSeconds.ToString(CultureInfo.InvariantCulture) + " s");
+                    return;
+                }
+
+                _phase = ShutterPhase.Error;
+                _endTimeUtc = default(DateTime);
+                _lastError = OneLine(error);
+                Persist();
+                throw new DomeCommandException(_lastError);
+            }
         }
 
         /// <summary>

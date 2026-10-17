@@ -48,6 +48,7 @@ namespace ASCOM.Clamshell.Dome
         private static string DriverProgId = ""; // ASCOM DeviceID (COM ProgID) for this driver, the value is set by the driver's class initialiser.
         private static string DriverDescription = ""; // The value is set by the driver's class initialiser.
         private static bool connectedState; // Local server's connected state
+        private static int connectionCount; // Number of ASCOM clients currently connected
         private static bool runOnce = false; // Flag to enable "one-off" activities only to run once.
         private static readonly object controllerSync = new object();
 
@@ -126,9 +127,12 @@ namespace ASCOM.Clamshell.Dome
         /// </summary>
         public static void SetupDialog()
         {
-            // Don't permit the setup dialogue if already connected
+            // The configuration cannot change while a client is connected: the controller may be mid-command.
             if (IsConnected)
-                MessageBox.Show("Already connected, just press OK");
+            {
+                MessageBox.Show(Strings.Get("AlreadyConnected"), Strings.Get("msg.error"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
 
             using (SetupDialogForm form = new SetupDialogForm(tl, Config.Clone(), Protector))
             {
@@ -268,10 +272,32 @@ namespace ASCOM.Clamshell.Dome
             set
             {
                 LogMessage("Connected", $"Set {value}");
-                if (value == IsConnected)
-                    return;
 
-                if (value)
+                // Several ASCOM clients can share this hardware class: it stays connected until the last one disconnects.
+                if (!value)
+                {
+                    if (connectionCount > 0)
+                        connectionCount--;
+
+                    if (connectionCount == 0)
+                    {
+                        LogMessage("Connected Set", "Disconnected.");
+                        connectedState = false;
+                    }
+                    else
+                    {
+                        LogMessage("Connected Set", $"Client disconnected, {connectionCount} still connected.");
+                    }
+                    return;
+                }
+
+                if (connectionCount > 0)
+                {
+                    connectionCount++;
+                    LogMessage("Connected Set", $"Already connected, now {connectionCount} clients.");
+                    return;
+                }
+
                 {
                     List<string> problems;
                     if (!Config.Validate(out problems))
@@ -288,12 +314,8 @@ namespace ASCOM.Clamshell.Dome
                     }
 
                     LogMessage("Connected Set", Config.SimulationMode ? "Connected (simulation mode)." : $"Connected, host {Config.Host} is reachable.");
+                    connectionCount = 1;
                     connectedState = true;
-                }
-                else
-                {
-                    LogMessage("Connected Set", "Disconnected.");
-                    connectedState = false;
                 }
             }
         }

@@ -70,11 +70,35 @@
     <Reference Include="ASCOM.Utilities, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
     <Reference Include="ASCOM.Utilities.Video, Version=6.1.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
     <Reference Include="System" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ClassFactory.cs" />
+    <Compile Include="Core\AuthMode.cs" />
+    <Compile Include="Core\CommandStep.cs" />
+    <Compile Include="Core\ConfigSerializer.cs" />
+    <Compile Include="Core\DomeAction.cs" />
+    <Compile Include="Core\DomeCommandException.cs" />
+    <Compile Include="Core\DomeConfig.cs" />
+    <Compile Include="Core\DomeController.cs" />
+    <Compile Include="Core\DpapiSecretProtector.cs" />
+    <Compile Include="Core\HttpPulseSender.cs" />
+    <Compile Include="Core\IPulseSender.cs" />
+    <Compile Include="Core\ISecretProtector.cs" />
+    <Compile Include="Core\IStateStore.cs" />
+    <Compile Include="Core\LogMask.cs" />
+    <Compile Include="Core\MemoryStateStore.cs" />
+    <Compile Include="Core\NullSecretProtector.cs" />
+    <Compile Include="Core\Reachability.cs" />
+    <Compile Include="Core\SafetyGuard.cs" />
+    <Compile Include="Core\SendResult.cs" />
+    <Compile Include="Core\ShutterPhase.cs" />
+    <Compile Include="Core\SimulatedPulseSender.cs" />
+    <Compile Include="DomeDriver\Strings.cs" />
     <Compile Include="DomeDriver\DomeDriver.cs" />
     <Compile Include="DomeDriver\DomeHardware.cs" />
     <Compile Include="frmMain.cs">
@@ -98,7 +122,6 @@
     <Compile Include="DomeDriver\SetupDialogForm.designer.cs">
       <DependentUpon>SetupDialogForm.cs</DependentUpon>
     </Compile>
-    <Compile Include="SharedResources.cs" />
     <EmbeddedResource Include="DomeDriver\SetupDialogForm.resx">
       <DependentUpon>SetupDialogForm.cs</DependentUpon>
       <SubType>Designer</SubType>

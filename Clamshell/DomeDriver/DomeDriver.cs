@@ -145,7 +145,7 @@ namespace ASCOM.Clamshell.Dome
                         // Dispose of managed objects here
 
                         // Clean up the trace logger object
-                        if (!(tl is null))
+                        if (!(tl == null))
                         {
                             tl.Enabled = false;
                             tl.Dispose();
